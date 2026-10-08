@@ -110,14 +110,17 @@
     background:
       repeating-linear-gradient(0deg, rgba(0,0,0,.10) 0 1px, transparent 1px 3px),
       radial-gradient(ellipse at center, transparent 55%, rgba(2,2,12,.5) 100%); }
+  #hud { padding-right:112px; }
+  #hud .level { font-size:16px; letter-spacing:1px; }
+  .pchip.s { color:#aefcff; border-color:#7df9ff; box-shadow:0 0 8px #7df9ff; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="hud">
     <div class="score">SCORE <span id="score">0</span></div>
+    <div class="level">LEVEL <span id="level">1</span></div>
     <div class="hi">HI <span id="hi">0</span></div>
-    <div class="level">LV <span id="level">1</span></div>
   </div>
   <div id="lives"></div>
   <div id="pwrap"></div>
@@ -128,8 +131,8 @@
   </div>
   <div id="overlay">
     <h1 id="ovTitle">BOMB<br>BLAST</h1>
-    <p id="ovText">Blast blocks, grab power-ups and find the <b style="color:#ff2e63">EXIT</b> door!<br>Don't let the flames touch it &mdash; it fights back.</p>
-    <p class="keys">Swipe to move &nbsp;&bull;&nbsp; Tap &#128165; for bomb, &#9889; to detonate<br>On desktop: hold arrows to walk, Space = bomb, X = detonate</p>
+    <p id="ovText">Defeat every enemy, then escape through the <b style="color:#ff2e63">EXIT</b> door!<br>Blast blocks for power-ups. One bomb kills any monster.</p>
+    <p class="keys">Swipe to move &nbsp;&bull;&nbsp; Tap to stop &nbsp;&bull;&nbsp; Tap &#128165; for bomb<br>On desktop: hold arrows to walk, Space = bomb, X = detonate</p>
     <button id="btn">START</button>
   </div>
 </div>
@@ -198,7 +201,7 @@ elHi.textContent = hi;
 const player = {
   x: 0, y: 0, size: TILE * 0.72, dir: {x:0, y:0}, queued: {x:1, y:0},
   speed: 5.4, bombsMax: 1, range: 2, shield: 0, dead: false,
-  powers: {remote:false, bombpass:false, flamepass:false},
+  powers: {remote:0, bombpass:0, flamepass:0}, // timed power-ups (seconds left)
 };
 
 function addScore(n, x, y) {
@@ -238,10 +241,8 @@ function genLevel() {
   shuffle(softCells).slice(0, Math.min(3 + level, 8)).forEach(([x, y]) => {
     hiddenPower[x + ',' + y] = typePool[(Math.random() * typePool.length) | 0];
   });
-  // hide the exit door under one random soft block (never under a powerup)
-  const doorCells = softCells.filter(([x, y]) => !hiddenPower[x + ',' + y]);
-  const dc = doorCells[(Math.random() * doorCells.length) | 0] || softCells[0];
-  door = {tx: dc[0], ty: dc[1], revealed: false};
+  // the exit door appears only after every enemy is defeated
+  door = {tx: -1, ty: -1, revealed: false};
   bombs = []; flames = []; powerups = []; floaters = [];
 
   // player
@@ -249,7 +250,7 @@ function genLevel() {
   player.y = 1 * TILE + (TILE - player.size) / 2;
   player.dir = {x:0, y:0}; player.queued = {x:0, y:0};
   player.bombsMax = 1; player.range = 2; player.speed = 5.4;
-  player.powers = {remote:false, bombpass:false, flamepass:false};
+  player.powers = {remote:0, bombpass:0, flamepass:0};
   player.shield = 2.5; player.dead = false;
   staticDirty = true;
 
@@ -260,14 +261,25 @@ function genLevel() {
   }
   shuffle(free);
   const n = Math.min(3 + level, 8);
+  // four enemy types, mixed from the start; every one dies to a single bomb
+  const pool = ['dumb', 'dumb', 'dash'];
+  if (level >= 2) pool.push('chase', 'dumb');
+  if (level >= 3) pool.push('flee', 'dash', 'chase');
+  const SPD = {
+    dumb: Math.min(2.1 + level * 0.28, 4.6),
+    dash: Math.min(3.0 + level * 0.30, 5.6),
+    chase: Math.min(2.4 + level * 0.30, 5.0),
+    flee: Math.min(2.2 + level * 0.28, 4.8),
+  };
   enemies = [];
   for (let i = 0; i < n && i < free.length; i++) {
     const [x, y] = free[i];
+    const type = pool[(Math.random() * pool.length) | 0];
     enemies.push({
       tx: x, ty: y, x: (x + 0.5) * TILE, y: (y + 0.5) * TILE,
       dir: DIRS4[(Math.random() * 4) | 0],
-      speed: Math.min(2.1 + level * 0.28, 4.6),
-      type: (level >= 3 && i % 2 === 0) ? 'chase' : 'dumb',
+      speed: SPD[type],
+      type,
       wob: Math.random() * 6.28, dead: false, _dec: '',
     });
   }
@@ -287,12 +299,14 @@ function nextLevel() {
 
 /* power chips + detonate button visibility, refreshed every frame */
 function updateHudExtras() {
+  const s = v => Math.ceil(v) + 's';
   const chips =
-    (player.powers.remote ? '<span class="pchip r">REMOTE</span>' : '') +
-    (player.powers.bombpass ? '<span class="pchip bp">B-PASS</span>' : '') +
-    (player.powers.flamepass ? '<span class="pchip fp">F-PASS</span>' : '');
+    (player.powers.remote > 0 ? '<span class="pchip r">REMOTE ' + s(player.powers.remote) + '</span>' : '') +
+    (player.powers.bombpass > 0 ? '<span class="pchip bp">B-PASS ' + s(player.powers.bombpass) + '</span>' : '') +
+    (player.powers.flamepass > 0 ? '<span class="pchip fp">F-PASS ' + s(player.powers.flamepass) + '</span>' : '') +
+    (player.shield > 0 ? '<span class="pchip s">SHIELD ' + s(player.shield) + '</span>' : '');
   if (elChips._h !== chips) { elChips._h = chips; elChips.innerHTML = chips; }
-  const showDet = state === 'playing' && player.powers.remote && bombs.some(b => !b.dead && b.remote);
+  const showDet = state === 'playing' && player.powers.remote > 0 && bombs.some(b => !b.dead && b.remote);
   detBtn.classList.toggle('show', showDet);
 }
 
@@ -303,7 +317,7 @@ function solidAt(tx, ty, isEnemy) {
   if (grid[ty][tx] !== 0) return true;
   const b = bombAt(tx, ty);
   // bomb-pass lets the knight stroll straight through his own bombs
-  if (b && !isEnemy && player.powers.bombpass) return false;
+  if (b && !isEnemy && player.powers.bombpass > 0) return false;
   // bombs are always solid for enemies; for the player only once stepped off
   if (b && (isEnemy || b.solid)) return true;
   return false;
@@ -348,7 +362,7 @@ function placeBomb() {
   const {tx, ty} = tileOfCenter(player);
   if (bombAt(tx, ty)) return;
   if (bombs.filter(b => !b.dead).length >= player.bombsMax) return;
-  const remote = player.powers.remote;
+  const remote = player.powers.remote > 0;
   bombs.push({tx, ty, fuse: remote ? 1e9 : 2.2, range: player.range, dead: false, solid: false, pulse: 0, remote});
   sfx.place();
 }
@@ -364,36 +378,26 @@ function destroyBlock(x, y) {
   staticDirty = true;
   addScore(10, (x + 0.5) * TILE, (y + 0.5) * TILE);
   const key = x + ',' + y;
-  if (door && !door.revealed && door.tx === x && door.ty === y) {
-    door.revealed = true;
-    floaters.push({x: (x + 0.5) * TILE, y: (y + 0.5) * TILE - 10, txt: 'EXIT FOUND!', ttl: 1.4});
-    sfx.power();
-  } else if (hiddenPower[key]) {
+  if (hiddenPower[key]) {
     powerups.push({tx: x, ty: y, type: hiddenPower[key], ttl: 12, fresh: true});
     delete hiddenPower[key];
   }
 }
-/* blasting the revealed exit angers it: it spawns reinforcements */
-function angerDoor() {
-  let spawned = 0;
+/* the exit appears once every enemy is defeated */
+function openExit() {
   const pt = tileOfCenter(player);
-  for (let y = 1; y < ROWS - 1 && spawned < 2; y++) for (let x = 1; x < COLS - 1; x++) {
-    if (spawned >= 2 || enemies.length >= 8) break;
+  const open = [];
+  for (let y = 1; y < ROWS - 1; y++) for (let x = 1; x < COLS - 1; x++) {
     if (grid[y][x] !== 0 || bombAt(x, y)) continue;
-    if (Math.abs(x - door.tx) + Math.abs(y - door.ty) > 4) continue;
     if (Math.abs(x - pt.tx) + Math.abs(y - pt.ty) < 4) continue;
-    enemies.push({
-      tx: x, ty: y, x: (x + 0.5) * TILE, y: (y + 0.5) * TILE,
-      dir: DIRS4[(Math.random() * 4) | 0],
-      speed: Math.min(2.1 + level * 0.28, 4.6),
-      type: 'dumb', wob: Math.random() * 6.28, dead: false, _dec: '',
-    });
-    spawned++;
+    open.push({x, y});
   }
-  if (spawned) {
-    floaters.push({x: (door.tx + 0.5) * TILE, y: (door.ty + 0.5) * TILE - 14, txt: 'THE EXIT FIGHTS BACK!', ttl: 1.6});
-  }
+  const c = open[(Math.random() * open.length) | 0] || {x: 1, y: 1};
+  door.tx = c.x; door.ty = c.y; door.revealed = true;
+  floaters.push({x: (c.x + 0.5) * TILE, y: (c.y + 0.5) * TILE - 14, txt: 'EXIT OPEN!', ttl: 1.6});
+  sfx.power();
 }
+
 function detonate(startBomb) {
   const queue = [startBomb];
   const allFlames = [];
@@ -415,10 +419,6 @@ function detonate(startBomb) {
     flames.push({tiles, ttl: 0.45});
     allFlames.push(...tiles);
   }
-  // blasting the revealed exit angers it: it spawns reinforcements
-  if (door && door.revealed && allFlames.some(t => t.x === door.tx && t.y === door.ty)) {
-    angerDoor();
-  }
   bombs = bombs.filter(b => !b.dead);
   // flames burn up old powerups, but never the ones just revealed
   powerups = powerups.filter(p => p.fresh || !allFlames.some(t => t.x === p.tx && t.y === p.ty));
@@ -433,6 +433,16 @@ function flameAt(tx, ty) {
 function updatePlayer(dt) {
   const p = player;
   if (p.shield > 0) p.shield -= dt;
+  // timed powers tick down; an expiring remote turns armed bombs into 1s-fuse bombs
+  for (const k of ['remote', 'bombpass', 'flamepass']) {
+    if (p.powers[k] > 0) {
+      p.powers[k] -= dt;
+      if (p.powers[k] <= 0) {
+        p.powers[k] = 0;
+        if (k === 'remote') for (const b of bombs) if (!b.dead && b.remote) { b.remote = false; b.fuse = Math.min(b.fuse, 1.0); }
+      }
+    }
+  }
   p.dir = p.queued;
   const sp = p.speed * TILE;
   const blocked = moveActor(p, p.dir.x * sp * dt, p.dir.y * sp * dt, false);
@@ -447,17 +457,17 @@ function updatePlayer(dt) {
       if (pu.type === 'bomb' && p.bombsMax < 5) p.bombsMax++;
       if (pu.type === 'flame' && p.range < 6) p.range++;
       if (pu.type === 'speed') p.speed = Math.min(p.speed + 1.1, 9);
-      if (pu.type === 'remote') p.powers.remote = true;
-      if (pu.type === 'bombpass') p.powers.bombpass = true;
-      if (pu.type === 'flamepass') p.powers.flamepass = true;
-      const names = {bomb:'BOMB+', flame:'FIRE+', speed:'SPEED+', remote:'REMOTE!', bombpass:'BOMB PASS!', flamepass:'FIRE PASS!'};
+      if (pu.type === 'remote') p.powers.remote = 25;
+      if (pu.type === 'bombpass') p.powers.bombpass = 15;
+      if (pu.type === 'flamepass') p.powers.flamepass = 15;
+      const names = {bomb:'BOMB+', flame:'FIRE+', speed:'SPEED+', remote:'REMOTE 25s!', bombpass:'BOMB PASS 15s!', flamepass:'FIRE PASS 15s!'};
       floaters.push({x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE - 14, txt: names[pu.type] || 'POWER!', ttl: 1.2});
       addScore(50, (tx + 0.5) * TILE, (ty + 0.5) * TILE);
       sfx.power(); powerups.splice(i, 1);
     }
   }
   // flame damage (fire-pass makes flames harmless)
-  if (p.shield <= 0 && !p.powers.flamepass && flameAt(tx, ty)) killPlayer();
+  if (p.shield <= 0 && !(p.powers.flamepass > 0) && flameAt(tx, ty)) killPlayer();
   // enemy contact
   if (p.shield <= 0) {
     const {cx, cy} = centerOf(p);
@@ -476,10 +486,12 @@ function enemyDecide(e) {
   let opts = DIRS4.filter(d => !(d.x === r.x && d.y === r.y) && !solidAt(e.tx + d.x, e.ty + d.y, true));
   if (!opts.length) opts = DIRS4.filter(d => !solidAt(e.tx + d.x, e.ty + d.y, true));
   if (!opts.length) { e.dir = {x:0, y:0}; return; }
-  if (e.type === 'chase' && opts.length > 1) {
-    opts.sort((a, b) =>
-      ((e.tx + a.x - p.tx) ** 2 + (e.ty + a.y - p.ty) ** 2) -
-      ((e.tx + b.x - p.tx) ** 2 + (e.ty + b.y - p.ty) ** 2));
+  if (e.type === 'dash' && Math.random() < 0.7 && !solidAt(e.tx + e.dir.x, e.ty + e.dir.y, true)) {
+    return; // dashers love straight lines
+  }
+  if ((e.type === 'chase' || e.type === 'flee') && opts.length > 1) {
+    const dist2 = d => (e.tx + d.x - p.tx) ** 2 + (e.ty + d.y - p.ty) ** 2;
+    opts.sort((a, b) => e.type === 'chase' ? dist2(a) - dist2(b) : dist2(b) - dist2(a));
     e.dir = opts[0];
   } else {
     e.dir = opts[(Math.random() * opts.length) | 0];
@@ -553,7 +565,10 @@ function update(dt) {
   enemies.forEach(e => { if (!e.dead) updateEnemy(e, dt); });
   enemies = enemies.filter(e => !e.dead);
 
-  // the exit door is the goal now: step through it to clear the stage
+  // all enemies defeated -> the exit door appears
+  if (state === 'playing' && !door.revealed && enemies.length === 0) openExit();
+
+  // step through the exit door to clear the stage
   if (state === 'playing' && door && door.revealed && !player.dead) {
     const {tx, ty} = tileOfCenter(player);
     if (tx === door.tx && ty === door.ty) {
@@ -904,6 +919,85 @@ function drawFlames() {
 }
 
 
+/* Neon spark: hyperactive orange dasher that loves straight lines */
+function drawSpark(e) {
+  const bob = Math.sin(e.wob * 2) * 2;
+  ctx.fillStyle = 'rgba(0,0,0,.35)';
+  ctx.beginPath(); ctx.ellipse(e.x, e.y + 14, 10, 4, 0, 0, 7); ctx.fill();
+  ctx.save();
+  ctx.shadowColor = '#ffb14d'; ctx.shadowBlur = 12;
+  ctx.strokeStyle = '#ffb14d'; ctx.lineWidth = 1.6;
+  // speed lines trailing behind
+  const mx = -Math.sign(e.dir.x || 1);
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.moveTo(e.x + mx * 12, e.y - 6); ctx.lineTo(e.x + mx * 20, e.y - 6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(e.x + mx * 12, e.y + 2); ctx.lineTo(e.x + mx * 22, e.y + 2); ctx.stroke();
+  ctx.globalAlpha = 1;
+  // round body
+  const g = ctx.createLinearGradient(0, e.y - 10, 0, e.y + 12);
+  g.addColorStop(0, '#7a3c00'); g.addColorStop(1, '#2a1500');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(e.x, e.y + 1 + bob * 0.4, 11, 0, 7); ctx.fill(); ctx.stroke();
+  // lightning bolt belly
+  ctx.shadowBlur = 8; ctx.fillStyle = '#ffe14d';
+  ctx.beginPath();
+  ctx.moveTo(e.x + 1, e.y - 3); ctx.lineTo(e.x - 4, e.y + 4); ctx.lineTo(e.x - 1, e.y + 4);
+  ctx.lineTo(e.x - 2, e.y + 9); ctx.lineTo(e.x + 4, e.y + 1); ctx.lineTo(e.x + 1, e.y + 1);
+  ctx.closePath(); ctx.fill();
+  // angry eyes
+  const look = Math.sign(player.x - e.x) * 1.5 || 0;
+  ctx.shadowBlur = 10; ctx.fillStyle = '#fff3d6';
+  ctx.beginPath(); ctx.arc(e.x - 4 + look, e.y - 3, 3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(e.x + 4 + look, e.y - 3, 3, 0, 7); ctx.fill();
+  ctx.shadowBlur = 0; ctx.fillStyle = '#3a1c00';
+  ctx.beginPath(); ctx.arc(e.x - 4 + look, e.y - 2.4, 1.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(e.x + 4 + look, e.y - 2.4, 1.5, 0, 7); ctx.fill();
+  // angry brows
+  ctx.shadowColor = '#ffb14d'; ctx.shadowBlur = 8;
+  ctx.strokeStyle = '#ffb14d'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(e.x - 7, e.y - 8); ctx.lineTo(e.x - 2, e.y - 6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(e.x + 7, e.y - 8); ctx.lineTo(e.x + 2, e.y - 6); ctx.stroke();
+  ctx.restore();
+}
+
+/* Neon hider: shy cyan ghost that flees from the knight */
+function drawHider(e) {
+  const float = Math.sin(e.wob * 1.6) * 3;
+  const y = e.y + float * 0.4;
+  ctx.fillStyle = 'rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(e.x, e.y + 15, 10, 3.5, 0, 0, 7); ctx.fill();
+  ctx.save();
+  ctx.shadowColor = '#4de3ff'; ctx.shadowBlur = 14;
+  ctx.strokeStyle = '#4de3ff'; ctx.lineWidth = 1.8;
+  const g = ctx.createLinearGradient(0, y - 14, 0, y + 14);
+  g.addColorStop(0, 'rgba(60,180,220,.5)'); g.addColorStop(1, 'rgba(20,80,120,.35)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(e.x, y - 2, 11.5, Math.PI, 0);
+  ctx.lineTo(e.x + 11.5, y + 8);
+  for (let i = 0; i < 4; i++) {
+    const x1 = e.x + 11.5 - (i * 2 + 1) * (23 / 8);
+    const x2 = e.x + 11.5 - (i * 2 + 2) * (23 / 8);
+    ctx.lineTo(x1, y + 12);
+    ctx.lineTo(x2, y + 8);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // shy hands over face
+  ctx.shadowBlur = 8; ctx.fillStyle = 'rgba(160,240,255,.9)';
+  ctx.beginPath(); ctx.arc(e.x - 5, y - 2, 3.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(e.x + 5, y - 2, 3.4, 0, 7); ctx.fill();
+  // worried eyes peeking through
+  ctx.fillStyle = '#062a38';
+  ctx.beginPath(); ctx.arc(e.x - 5, y - 3, 1.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(e.x + 5, y - 3, 1.4, 0, 7); ctx.fill();
+  // wavy shy mouth
+  ctx.strokeStyle = '#062a38'; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(e.x - 3, y + 6);
+  ctx.quadraticCurveTo(e.x - 1.5, y + 4.5, e.x, y + 6);
+  ctx.quadraticCurveTo(e.x + 1.5, y + 7.5, e.x + 3, y + 6); ctx.stroke();
+  ctx.restore();
+}
+
 /* ================= RENDER ================= */
 function draw(t) {
   ctx.save();
@@ -923,7 +1017,10 @@ function draw(t) {
 
   // enemies
   for (const e of enemies) {
-    if (e.type === 'chase') drawWisp(e); else drawGremlin(e);
+    if (e.type === 'chase') drawWisp(e);
+    else if (e.type === 'dash') drawSpark(e);
+    else if (e.type === 'flee') drawHider(e);
+    else drawGremlin(e);
   }
 
   // player
@@ -1002,6 +1099,8 @@ cv.addEventListener('touchend', e => {
   const dx = t.clientX - touchS.clientX, dy = t.clientY - touchS.clientY;
   if (Math.hypot(dx, dy) > 24) {
     player.queued = Math.abs(dx) > Math.abs(dy) ? {x: Math.sign(dx), y: 0} : {x: 0, y: Math.sign(dy)};
+  } else {
+    player.queued = {x: 0, y: 0}; // tap = stop
   }
   touchS = null; e.preventDefault();
 }, {passive:false});
