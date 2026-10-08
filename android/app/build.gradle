@@ -1,0 +1,34 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.bombblast.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.bombblast.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Single source of truth: copy the web game into assets before every build
+tasks.register('copyWebAssets', Copy) {
+    from '../../www'
+    into 'src/main/assets/www'
+}
+tasks.named('preBuild') { dependsOn 'copyWebAssets' }
