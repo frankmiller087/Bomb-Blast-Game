@@ -1,5 +1,5 @@
-# Save as .github/workflows/build-apk.yml in the repo, commit to main.
-# The push triggers this workflow automatically; the APK lands in Artifacts.
+# CI: builds the Bomb Blast debug APK on every push to main.
+# The APK lands in the run's Artifacts as "bomb-blast-apk".
 name: Build APK
 
 on:
@@ -19,11 +19,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform and build tools
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Install Android SDK packages
+        run: |
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
