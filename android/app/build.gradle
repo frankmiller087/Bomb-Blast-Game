@@ -14,25 +14,27 @@ android {
         versionName '1.0'
     }
 
-    buildTypes {
-        debug {
-            // Stable debug key across all CI runs: every build signs with the
-            // same key, so new APKs install as clean updates over older ones
-            // instead of failing with an INSTALL signature-conflict error.
-            signingConfig signingConfigs.debugStable
-        }
-        release {
-            minifyEnabled false
-        }
-    }
-
     signingConfigs {
         debugStable {
+            // Stable key shared across all CI runs: every build signs with the
+            // same key, so new APKs install as clean updates over older ones
+            // instead of failing with an INSTALL signature-conflict error.
+            // NOTE: signingConfigs must come before buildTypes (Gradle
+            // evaluates the android block top-down).
             storeFile file('../debug.keystore')
             storePassword 'android'
             storeType 'PKCS12'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debugStable
+        }
+        release {
+            minifyEnabled false
         }
     }
 
