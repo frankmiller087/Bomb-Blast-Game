@@ -1,7 +1,7 @@
 plugins {
     // AGP version pinned: versionless plugin resolution is unreliable on
     // fresh runners (no Gradle cache), so always specify it explicitly.
-    id 'com.android.application' version '8.7.3'
+    id 'com.android.application' version '8.5.2'
 }
 
 android {
