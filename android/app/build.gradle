@@ -15,8 +15,24 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Stable debug key across all CI runs: every build signs with the
+            // same key, so new APKs install as clean updates over older ones
+            // instead of failing with an INSTALL signature-conflict error.
+            signingConfig signingConfigs.debugStable
+        }
         release {
             minifyEnabled false
+        }
+    }
+
+    signingConfigs {
+        debugStable {
+            storeFile file('../debug.keystore')
+            storePassword 'android'
+            storeType 'PKCS12'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
         }
     }
 
